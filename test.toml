@@ -1,0 +1,154 @@
+name = "UniversalFSM"
+description = "Пример FSM"
+version = "1.0"
+schema_version = "2025-08-13"
+timezone = "Europe/Berlin"
+initial_state = "Idle"
+final_states = [ "Final",]
+"global.transitions" = []
+[[variables]]
+name = "power_on"
+type = "bool"
+initial = "True"
+persist = true
+description = "Питание"
+
+[[variables]]
+name = "counter"
+type = "int"
+initial = "0"
+persist = false
+description = ""
+
+[[variables]]
+name = "limit"
+type = "int"
+initial = "10"
+persist = false
+description = ""
+
+[[sources]]
+id = "uart"
+type = "serial"
+connection = "/dev/ttyUSB0"
+description = "UART port"
+
+[[sources]]
+id = "gpio"
+type = "digital_input"
+connection = ""
+description = "GPIO inputs"
+
+[[sources]]
+id = "db"
+type = "database"
+connection = "sqlite:///data.db"
+description = "sqlite"
+
+[[sources]]
+id = "internal"
+type = "logic"
+connection = ""
+description = "internal timers/events"
+
+[[actions]]
+id = "init_idle"
+kind = "sync"
+type = "sync"
+impl = "module.init_idle"
+
+[[actions]]
+id = "start_pump"
+kind = "async"
+type = "async"
+impl = "pump.start"
+
+[[actions]]
+id = "release_resources"
+kind = "sync"
+type = "sync"
+impl = "module.release_resources"
+
+[[actions]]
+id = "log_and_stop"
+kind = "sync"
+type = "sync"
+impl = "module.log_and_stop"
+
+[[states]]
+id = "Idle"
+type = "atomic"
+on_enter = [ "init_idle",]
+on_exit = [ "release_resources",]
+[[states.transitions]]
+id = "t_uart_and_db"
+trigger = "uart.start"
+guard = "db:SELECT enabled FROM settings WHERE id=${profile_id}"
+target = "Running"
+actions = [ "start_pump",]
+priority = 10
+consume = true
+
+[[states.transitions]]
+id = "t_uart_tds_threshold"
+trigger = "uart.tds *"
+guard = "expr:event.value >= var.limit"
+target = "Running"
+actions = [ "start_pump",]
+
+
+[[states]]
+id = "Running"
+type = "compound"
+initial_substate = "RunActive"
+history = "shallow"
+[[states.substates]]
+id = "RunActive"
+type = "atomic"
+[[states.substates.transitions]]
+id = "t_run_low_pressure"
+trigger = "sensor.pressure *"
+guard = "expr:event.value < 2.0"
+target = "Error"
+actions = [ "log_and_stop",]
+consume = true
+
+[[states.substates.timeouts]]
+id = "run_max_time"
+duration_ms = 600000
+target = "Idle"
+actions = [ "release_resources",]
+
+
+[[states.substates]]
+id = "RunPaused"
+type = "atomic"
+
+
+[[states]]
+id = "Error"
+type = "atomic"
+on_enter = [ "log_and_stop",]
+[[states.transitions]]
+id = "t_error_reset"
+trigger = "gpio.reset pressed"
+guard = "expr:var.power_on == true"
+target = "Idle"
+actions = []
+
+
+[[states]]
+id = "Sleep"
+type = "atomic"
+
+[[timers]]
+id = "heartbeat"
+type = "periodic"
+interval_ms = 1000
+event = "internal.heartbeat"
+auto_start = true
+payload = ""
+
+[metadata]
+author = "denis"
+created_at = "2025-08-14T07:41:20.690334Z"
