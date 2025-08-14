@@ -2,12 +2,15 @@
 # Полнофункциональный FSM TOML configurator
 # Требует: PyQt6, tomllib/tomli/tomli-w, networkx, matplotlib, python-dateutil
 
-import sys, re, traceback, json
-from pathlib import Path
+import json
+import re
+import sys
+import traceback
 from copy import deepcopy
-from functools import partial
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any
+from contextlib import suppress
+
 try:
     import tomllib  # Python 3.11+
 except Exception:  # pragma: no cover
@@ -18,27 +21,45 @@ except Exception:  # pragma: no cover
     tomli_w = None
 
 # PyQt6 imports
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QFileDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QTabWidget,
-    QFormLayout, QTextEdit, QMessageBox, QComboBox, QSpinBox, QCheckBox,
-    QTreeWidget, QTreeWidgetItem, QSplitter, QGroupBox, QTableWidget, QTableWidgetItem
-)
-from PyQt6.QtCore import Qt, QSize
-from PyQt6.QtGui import QPalette, QColor
-from PyQt6.QtCore import QEvent, QObject
-from PyQt6.QtCore import QTimer
-from qt_material import apply_stylesheet, list_themes
-from PyQt6.QtWidgets import QStyledItemDelegate, QCompleter, QAbstractItemView
+import matplotlib
 
 # Graphing
 import networkx as nx
-import matplotlib
+from PyQt6.QtCore import QEvent, QObject, Qt, QTimer
+from PyQt6.QtGui import QColor, QPalette
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QApplication,
+    QComboBox,
+    QCompleter,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QStyledItemDelegate,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
+)
+from qt_material import apply_stylesheet, list_themes
+
 matplotlib.use("QtAgg")
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
 import sqlite3
 from types import SimpleNamespace
+
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 # --- Utilities & Defaults ---
 
@@ -91,15 +112,15 @@ DEFAULT_EXAMPLE = {
 }
 
 # --- TOML load/save helpers ---
-def load_toml_file(path: str) -> Dict[str, Any]:
+def load_toml_file(path: str) -> dict[str, Any]:
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
         return data
-    except Exception as e:
+    except Exception:
         raise
 
-def save_toml_file(path: str, data: Dict[str, Any]) -> None:
+def save_toml_file(path: str, data: dict[str, Any]) -> None:
     if tomli_w is None:
         raise RuntimeError("tomli_w is required for writing TOML")
     with open(path, "wb") as f:
@@ -110,10 +131,10 @@ class FSMValidator:
     """
     Набор встроенных валидаторов. Анализирует структуру и возвращает список ошибок/предупреждений.
     """
-    def __init__(self, fsm: Dict[str, Any], auto_create_missing_targets: bool = True):
+    def __init__(self, fsm: dict[str, Any], auto_create_missing_targets: bool = True):
         self.fsm = deepcopy(fsm)
-        self.errors: List[str] = []
-        self.warnings: List[str] = []
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
         self.auto_create = auto_create_missing_targets
 
     def run_all(self):
@@ -211,7 +232,11 @@ class FSMValidator:
                 guard = t.get("guard", "")
                 for m in pattern.findall(guard):
                     if m not in var_names:
-                        self.errors.append(f"Guard in transition {t.get('id','<no id>')} references unknown variable '${{{m}}}'.")
+                        self.errors.append(
+                            "Guard in transition "
+                            f"{t.get('id','<no id>')} "
+                            f"references unknown variable '${{{m}}}'."
+                        )
 
                 # expr: usage check
                 if guard.startswith("expr:") or guard.startswith("var:"):
@@ -219,7 +244,11 @@ class FSMValidator:
                     refs = re.findall(r"var\.([A-Za-z_][A-Za-z0-9_]*)", guard)
                     for r in refs:
                         if r not in var_names:
-                            self.errors.append(f"Guard expr in transition {t.get('id','<no id>')} references unknown var '{r}'.")
+                            self.errors.append(
+                                "Guard expr in transition "
+                                f"{t.get('id','<no id>')} "
+                                f"references unknown var '{r}'."
+                            )
 
     def _check_actions_references(self):
         actions_ids = set([a.get("id") for a in self.fsm.get("actions", []) if a.get("id")])
@@ -228,7 +257,10 @@ class FSMValidator:
             for t in s.get("transitions", []):
                 for a in t.get("actions", []):
                     if isinstance(a, str) and ":" not in a and a not in actions_ids:
-                        self.warnings.append(f"Action '{a}' referenced but not found in actions catalog (transition {t.get('id','<no id>')}).")
+                        self.warnings.append(
+                            "Action '" + a + "' referenced but not found in actions catalog "
+                            f"(transition {t.get('id','<no id>')})."
+                        )
 
     def _check_timers(self):
         for t in self.fsm.get("timers", []):
@@ -237,7 +269,11 @@ class FSMValidator:
         for s in self.fsm.get("states", []):
             for to in s.get("timeouts", []):
                 if to.get("duration_ms", 0) <= 0:
-                    self.errors.append(f"Timeout {to.get('id','<no id>')} in state {s.get('id')} has non-positive duration_ms.")
+                    self.errors.append(
+                        "Timeout "
+                        f"{to.get('id','<no id>')} "
+                        f"in state {s.get('id')} has non-positive duration_ms."
+                    )
 
     def _check_cycles(self):
         # build directed graph from states/transitions and detect simple cycles without timers
@@ -276,10 +312,10 @@ class LiveGuardEngine:
     - expr: <python-like expression> with variables: var.*, event.*
     - db: <SQL with ${placeholders}> executed against first database source (sqlite)
     """
-    def __init__(self, fsm: Dict[str, Any]):
+    def __init__(self, fsm: dict[str, Any]):
         self.fsm = fsm
 
-    def _find_sqlite_path(self) -> Optional[str]:
+    def _find_sqlite_path(self) -> str | None:
         for src in self.fsm.get("sources", []):
             if src.get("type") == "database":
                 conn = src.get("connection", "")
@@ -292,7 +328,7 @@ class LiveGuardEngine:
                     return conn[len("sqlite:"):]
         return None
 
-    def _substitute_placeholders(self, text: str, variables: Dict[str, Any], extra: Dict[str, Any]) -> str:
+    def _substitute_placeholders(self, text: str, variables: dict[str, Any], extra: dict[str, Any]) -> str:
         pattern = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
         def repl(m):
             name = m.group(1)
@@ -303,7 +339,7 @@ class LiveGuardEngine:
             return m.group(0)
         return pattern.sub(repl, text)
 
-    def evaluate_guard(self, guard: str, variables: Dict[str, Any], event: Dict[str, Any], extra_placeholders: Optional[Dict[str, Any]] = None) -> Tuple[bool, str]:
+    def evaluate_guard(self, guard: str, variables: dict[str, Any], event: dict[str, Any], extra_placeholders: dict[str, Any] | None = None) -> tuple[bool, str]:
         extra = extra_placeholders or {}
         guard = (guard or "").strip()
         if not guard:
@@ -332,10 +368,13 @@ class LiveGuardEngine:
                         return False, "db: no rows"
                     val = row[0]
                     truthy = False
-                    if isinstance(val, (int, float)):
-                        truthy = (val != 0)
-                    elif isinstance(val, (str, bytes)):
-                        truthy = str(val).strip().lower() in ("1","true","yes","on") or len(str(val).strip())>0
+                    if isinstance(val, int | float):
+                        truthy = val != 0
+                    elif isinstance(val, str | bytes):
+                        truthy = (
+                            str(val).strip().lower() in ("1", "true", "yes", "on")
+                            or len(str(val).strip()) > 0
+                        )
                     else:
                         truthy = bool(val)
                     return truthy, f"db first cell: {val}"
@@ -362,14 +401,14 @@ class GraphCanvas(FigureCanvas):
         self.dragging = False
         self.edge_drag_from = None
         self.on_connect_nodes = None  # callback(src_id: str, tgt_id: str)
-        self.edge_labels: Dict[Tuple[str,str], str] = {}
+        self.edge_labels: dict[tuple[str,str], str] = {}
 
         self._cid_press = self.mpl_connect('button_press_event', self._on_press)
         self._cid_release = self.mpl_connect('button_release_event', self._on_release)
         self._cid_move = self.mpl_connect('motion_notify_event', self._on_motion)
         self._cid_pick = self.mpl_connect('pick_event', self._on_pick)
 
-    def load_from_fsm(self, fsm: Dict[str, Any]):
+    def load_from_fsm(self, fsm: dict[str, Any]):
         self.G.clear()
         self.node_artist_map = {}
         self.edge_labels = {}
@@ -378,7 +417,7 @@ class GraphCanvas(FigureCanvas):
             sid = s.get("id")
             self.G.add_node(sid)
         # edges as unique pairs and collect labels from all transitions
-        pair_to_labels: Dict[Tuple[str,str], List[str]] = {}
+        pair_to_labels: dict[tuple[str,str], list[str]] = {}
         for s in fsm.get("states", []):
             for t in s.get("transitions", []):
                 src = s.get("id")
@@ -396,17 +435,17 @@ class GraphCanvas(FigureCanvas):
                     pair_to_labels.setdefault(pair, []).append(label)
         # aggregate per pair
         for pair, labels in pair_to_labels.items():
-            self.edge_labels[pair] = "\n---\n".join([l for l in labels if l])
+            self.edge_labels[pair] = "\n---\n".join([lbl for lbl in labels if lbl])
         # compute layout
         if len(self.G.nodes) == 0:
             self.pos = {}
         else:
-            self.pos = nx.spring_layout(self.G, seed=2, k=1.2/ (len(self.G.nodes)**0.5))
+            self.pos = nx.spring_layout(self.G, seed=2, k=1.2 / (len(self.G.nodes) ** 0.5))
         self.draw_graph()
 
     def autolayout(self):
         if len(self.G.nodes) > 0:
-            self.pos = nx.spring_layout(self.G, seed=2, k=1.2/ (len(self.G.nodes)**0.5))
+            self.pos = nx.spring_layout(self.G, seed=2, k=1.2 / (len(self.G.nodes) ** 0.5))
             self.draw_graph()
 
     def draw_graph(self):
@@ -421,7 +460,7 @@ class GraphCanvas(FigureCanvas):
         # draw nodes as scatter to make them pickable
         xs = [self.pos[n][0] for n in self.G.nodes]
         ys = [self.pos[n][1] for n in self.G.nodes]
-        nodesc = self.ax.scatter(xs, ys, s=800, c='lightblue', zorder=3, picker=5)
+        _ = self.ax.scatter(xs, ys, s=800, c='lightblue', zorder=3, picker=5)
         # put labels
         for n in self.G.nodes:
             x,y = self.pos[n]
@@ -486,10 +525,10 @@ class FSMConfiguratorMain(QMainWindow):
         super().__init__()
         self.setWindowTitle("FSM Configurator — Extended")
         self.resize(1200, 800)
-        self.current_file: Optional[str] = None
+        self.current_file: str | None = None
         self.fsm = deepcopy(DEFAULT_EXAMPLE)
         self.guard_engine = LiveGuardEngine(self.fsm)
-        self._focus_filters_store: List[QObject] = []
+        self._focus_filters_store: list[QObject] = []
         self._build_ui()
         self.refresh_all()
         # Apply initial qt-material theme
@@ -740,7 +779,12 @@ class FSMConfiguratorMain(QMainWindow):
         vbox.addWidget(self.btn_run_valid)
         self.btn_run_valid.clicked.connect(self.run_validation)
         # Live guard tester
-        self.guard_input = QLineEdit(); self.guard_input.setPlaceholderText("expr:event.value >= var.limit  |  db:SELECT 1 FROM settings WHERE id=${profile_id} AND enabled=1")
+        self.guard_input = QLineEdit(); self.guard_input.setPlaceholderText(
+            (
+                "expr:event.value >= var.limit  |  "
+                "db:SELECT 1 FROM settings WHERE id=${profile_id} AND enabled=1"
+            )
+        )
         self.guard_event_value = QLineEdit(); self.guard_event_value.setPlaceholderText("event.value (e.g., 2.5)")
         self.guard_extra_json = QTextEdit(); self.guard_extra_json.setPlaceholderText('{"profile_id": 123}')
         self.guard_result = QTextEdit(); self.guard_result.setReadOnly(True)
@@ -766,7 +810,7 @@ class FSMConfiguratorMain(QMainWindow):
         self.btn_export_puml.clicked.connect(self.generate_plantuml)
 
     # --- UI helpers for tables ---
-    def _table_push_rows(self, table: QTableWidget, rows: List[List[Any]]):
+    def _table_push_rows(self, table: QTableWidget, rows: list[list[Any]]):
         prev = table.blockSignals(True)
         table.setRowCount(0)
         for r in rows:
@@ -900,7 +944,8 @@ class FSMConfiguratorMain(QMainWindow):
             ids = [s.get("id") for s in self.fsm.get("states", [])]
             candidate = base
             while candidate in ids:
-                i+=1; candidate = f"{base}{i}"
+                i += 1
+                candidate = f"{base}{i}"
             self.fsm.setdefault("states", []).append({"id": candidate, "type": "atomic"})
             self.refresh_all()
 
@@ -1175,14 +1220,20 @@ class FSMConfiguratorMain(QMainWindow):
         return "\n".join(lines)
 
     def _generate_plantuml_text(self) -> str:
-        lines = ["@startuml", "hide empty description", "skinparam state {\n  BackgroundColor LightYellow\n}"]
+        lines = [
+            "@startuml",
+            "hide empty description",
+            "skinparam state {\n  BackgroundColor LightYellow\n}",
+        ]
         for s in self.fsm.get("states", []):
             lines.append(f'state {s.get("id")}')
         for s in self.fsm.get("states", []):
             for t in s.get("transitions", []):
-                src = s.get("id"); tgt = t.get("target"); label = t.get("id","")
+                src = s.get("id")
+                tgt = t.get("target")
+                label = t.get("id", "")
                 if tgt:
-                    lines.append(f'{src} --> {tgt} : {label}')
+                    lines.append(f"{src} --> {tgt} : {label}")
         lines.append("@enduml")
         return "\n".join(lines)
 
@@ -1212,7 +1263,7 @@ class FSMConfiguratorMain(QMainWindow):
     def test_guard_now(self):
         self._sync_ui_to_model()
         # build variables dict from model
-        vars_map: Dict[str, Any] = {}
+        vars_map: dict[str, Any] = {}
         for v in self.fsm.get("variables", []):
             name = v.get("name")
             val = v.get("initial")
@@ -1286,13 +1337,11 @@ class FSMConfiguratorMain(QMainWindow):
         self._set_lineedit_completer(self.input_on_enter, actions)
         self._set_lineedit_completer(self.input_on_exit, actions)
 
-    def _set_lineedit_completer(self, line: QLineEdit, items: List[str]) -> None:
+    def _set_lineedit_completer(self, line: QLineEdit, items: list[str]) -> None:
         comp = QCompleter(items)
         comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-        try:
+        with suppress(Exception):
             comp.setFilterMode(Qt.MatchFlag.MatchContains)
-        except Exception:
-            pass
         comp.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
         line.setCompleter(comp)
         # show on focus
@@ -1300,20 +1349,22 @@ class FSMConfiguratorMain(QMainWindow):
         line.installEventFilter(filt)
         # keep reference so it is not garbage collected
         self._focus_filters_store.append(filt)
-        # and show immediately on first setup
-        QTimer.singleShot(0, comp.complete)
 
-    def _apply_contrast_css(self, theme_name: Optional[str]) -> None:
+    def _apply_contrast_css(self, theme_name: str | None) -> None:
         # ensure text is readable on dark backgrounds
         stylesheet = QApplication.instance().styleSheet() or ""
         is_dark = bool(theme_name and theme_name.startswith("dark_"))
         fg = "#ffffff" if is_dark else "#000000"
         # Avoid duplicating our block
         if "/*contrast-css*/" not in stylesheet:
-            stylesheet += f"\n/*contrast-css*/\nQLineEdit, QTextEdit, QPlainTextEdit, QTableView, QTableWidget, QComboBox, QListWidget {{ color: {fg}; }}\n"
+            stylesheet += (
+                "\n/*contrast-css*/\n"
+                "QLineEdit, QTextEdit, QPlainTextEdit, QTableView, QTableWidget, QComboBox, QListWidget { "
+                f"color: {fg}; }}\n"
+            )
             QApplication.instance().setStyleSheet(stylesheet)
 
-    def _ensure_actions_exist(self, ids: List[str]) -> None:
+    def _ensure_actions_exist(self, ids: list[str]) -> None:
         existing = {a.get("id"): a for a in self.fsm.get("actions", []) if a.get("id")}
         changed = False
         for aid in ids:
@@ -1334,7 +1385,7 @@ class FSMConfiguratorMain(QMainWindow):
             self._attach_state_card_completers()
 
     def _ensure_actions_from_model_references(self) -> None:
-        refs: List[str] = []
+        refs: list[str] = []
         # state transitions
         for s in self.fsm.get("states", []):
             for t in s.get("transitions", []):
@@ -1366,10 +1417,8 @@ class TransitionLikeDelegate(QStyledItemDelegate):
                 sugg = [f"{s}." for s in srcs] + ["internal.", "regex:", "any:"]
                 comp = QCompleter(sugg)
                 comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-                try:
+                with suppress(Exception):
                     comp.setFilterMode(Qt.MatchFlag.MatchContains)
-                except Exception:
-                    pass
                 comp.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
                 editor.setCompleter(comp)
                 QTimer.singleShot(0, comp.complete)
@@ -1377,10 +1426,8 @@ class TransitionLikeDelegate(QStyledItemDelegate):
                 states = [s.get("id","") for s in self.main.fsm.get("states", []) if s.get("id")]
                 comp = QCompleter(states)
                 comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-                try:
+                with suppress(Exception):
                     comp.setFilterMode(Qt.MatchFlag.MatchContains)
-                except Exception:
-                    pass
                 comp.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
                 editor.setCompleter(comp)
                 QTimer.singleShot(0, comp.complete)
@@ -1388,10 +1435,8 @@ class TransitionLikeDelegate(QStyledItemDelegate):
                 acts = [a.get("id","") for a in self.main.fsm.get("actions", []) if a.get("id")]
                 comp = QCompleter(acts)
                 comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-                try:
+                with suppress(Exception):
                     comp.setFilterMode(Qt.MatchFlag.MatchContains)
-                except Exception:
-                    pass
                 comp.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
                 editor.setCompleter(comp)
                 QTimer.singleShot(0, comp.complete)
@@ -1450,11 +1495,11 @@ class ActionsDelegate(QStyledItemDelegate):
         if isinstance(editor, QLineEdit):
             col = index.column()
             if col == 1:  # type
-                comp = QCompleter(["sync","async"]) 
+                comp = QCompleter(["sync","async"])
                 comp.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
                 editor.setCompleter(comp); QTimer.singleShot(0, comp.complete)
             elif col == 2:  # impl template suggestions
-                comp = QCompleter(["module.func", "package.module:callable"]) 
+                comp = QCompleter(["module.func", "package.module:callable"])
                 comp.setCompletionMode(QCompleter.CompletionMode.UnfilteredPopupCompletion)
                 editor.setCompleter(comp); QTimer.singleShot(0, comp.complete)
         return editor
@@ -1496,7 +1541,14 @@ def main():
             # but ensure early widgets are readable
             is_dark = default_theme.startswith("dark_")
             fg = "#ffffff" if is_dark else "#000000"
-            app.setStyleSheet((app.styleSheet() or "") + f"\n/*contrast-css*/\nQLineEdit, QTextEdit, QPlainTextEdit, QTableView, QTableWidget, QComboBox, QListWidget {{ color: {fg}; }}\n")
+            app.setStyleSheet(
+                (app.styleSheet() or "")
+                + (
+                    "\n/*contrast-css*/\n"
+                    "QLineEdit, QTextEdit, QPlainTextEdit, QTableView, QTableWidget, QComboBox, QListWidget { "
+                    f"color: {fg}; }}\n"
+                )
+            )
     except Exception:
         pass
     win = FSMConfiguratorMain()
@@ -1506,11 +1558,20 @@ def main():
 # helper filter to pop completer on focus
 class FocusCompleterFilter(QObject):
     def eventFilter(self, obj, event):
-        if event.type() in (QEvent.Type.FocusIn, QEvent.Type.MouseButtonPress):
+        if event.type() == QEvent.Type.MouseButtonPress:
             try:
                 comp = obj.completer()
                 if comp:
                     comp.complete()
+            except Exception:
+                pass
+        elif event.type() == QEvent.Type.KeyPress:
+            # show list on Down arrow request
+            try:
+                if hasattr(event, "key") and event.key() == Qt.Key.Key_Down:
+                    comp = obj.completer()
+                    if comp:
+                        comp.complete()
             except Exception:
                 pass
         return False
