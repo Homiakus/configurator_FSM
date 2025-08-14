@@ -61,6 +61,9 @@ id = "Running"
 type = "compound"
 initial_substate = "RunActive"
 history = "shallow"
+transitions = [
+    { id = "t_Running_new_1", trigger = "", guard = "", target = "", actions = [], priority = 10 },
+]
 
 [[states.substates]]
 id = "RunActive"
@@ -105,19 +108,10 @@ actions = []
 [[states]]
 id = "Sleep"
 type = "atomic"
-title = ""
-description = ""
-on_enter = []
-on_exit = []
-timeouts = []
 
-[[states.transitions]]
-id = "t_Sleep_new_1"
-trigger = "uart.*"
-guard = ""
-target = "Idle"
-actions = []
-priority = 10
+[[states]]
+id = "new"
+type = "atomic"
 
 [[timers]]
 id = "heartbeat"
@@ -129,4 +123,4 @@ payload = ""
 
 [metadata]
 author = "denis"
-created_at = "2025-08-14T09:14:06.224338+00:00"
+created_at = "2025-08-14T09:10:50.320853+00:00"

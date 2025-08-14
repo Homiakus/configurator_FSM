@@ -3,16 +3,25 @@ PyQt6>=6.6.1          # GUI
 PyQt6-Qt6>=6.6.1
 PyQt6-sip>=13.6.0
 
+# --- UI темы ---
+qt-material>=2.17     # Material стили для PyQt6 (dark/light)
+
 # --- Работа с TOML ---
+# Чтение: tomllib (Python 3.11+) или tomli (fallback)
+# Запись: tomli-w
+# В проекте используется tomllib/tomli/tomli-w, пакет 'toml' не требуется
+# при необходимости можно полностью перейти на стандартный tomllib (3.11+) и убрать tomli
+# и оставить только tomli-w для записи
+#
 tomli>=2.0.1          # Чтение TOML (Python <3.11)
 tomli-w>=1.0.0        # Запись TOML
-# Для Python >=3.11 можно использовать встроенный tomllib вместо tomli
 
 # --- Валидация данных ---
 jsonschema>=4.22.0    # JSON Schema для payload и структур
 pydantic>=2.7.4       # Модельное представление FSM, строгая типизация
 
 # --- Визуализация и диаграммы ---
+matplotlib>=3.8       # Граф и Qt6 backend (qtagg)
 graphviz>=0.20.3      # Построение диаграмм состояния
 pygraphviz>=1.12      # Альтернативный рендеринг графа
 networkx>=3.3         # Логические операции с графом

@@ -1,0 +1,19 @@
+## Задача: Подключение SQLite live guards, drag&connect и визуализация условий/действий
+- **Статус**: В процессе
+- **Описание**: Добавить онлайн-оценку guard-условий (expr/db) с SQLite, реализовать соединение состояний перетаскиванием на графе, показать условия переходов и actions на рёбрах, актуализировать экспорт Mermaid/PlantUML, исправить backend Matplotlib под PyQt6.
+- **Шаги выполнения**:
+  - [x] Обновить backend Matplotlib на Qt6 (`backend_qtagg`)
+  - [x] Добавить зависимости `matplotlib`, `toml` в `requirements.txt`
+  - [x] Реализовать LiveGuardEngine с поддержкой `expr:` и `db:` (SQLite)
+  - [x] Добавить UI для тестирования guard-условий на вкладке Validators
+  - [x] Реализовать drag-to-connect для создания переходов в графе
+  - [x] Отображать id/trigger/[guard]/actions на рёбрах графа
+  - [x] Обновить экспорт Mermaid/PlantUML для включения guard/actions
+  - [ ] Протестировать на Windows (venv, PyQt6, matplotlib)
+  - [ ] Добавить unit-тесты для LiveGuardEngine
+  - [x] Переход на tomllib/tomli + tomli-w; удалить зависимость toml
+  - [x] Добавить удаление выбранных строк во всех таблицах (variables/sources/actions/timers/globals)
+  - [x] Современный UI: стиль Fusion + переключатель Dark/Light
+  - [x] Интеграция qt-material (2.17) с выбором темы
+  - [x] Включить автоподстановку (QCompleter) для inputs и таблиц (источники, цели, actions, guards, типы)
+- **Зависимости**: Требуется наличие SQLite-файла, указанного в `sources.connection` формата `sqlite:///path/to.db` 
